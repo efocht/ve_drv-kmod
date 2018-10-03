@@ -136,9 +136,20 @@ struct ve_vp {
 	struct vp vp_info;
 };
 
+struct ve_vp_blk {
+	enum pd_list type;
+	struct vp_blk vp_info;
+};
+
 struct ve_vp_release {
 	enum pd_list type;
 	unsigned long addr;
+};
+
+struct ve_vp_blk_release {
+	enum pd_list type;
+	int npages;
+	uint64_t *addr;
 };
 
 /**
@@ -222,5 +233,9 @@ struct ve_unmap {
 #define VEDRV_CMD_RST_INTR_COUNT	_IOR(VE_IOC_MAGIC, 18, uint64_t)
 #define VEDRV_CMD_VE_RESET		_IOR(VE_IOC_MAGIC, 19, uint64_t)
 #define VEDRV_CMD_REVIVE_TASK		_IOR(VE_IOC_MAGIC, 20, pid_t)
+#define VEDRV_CMD_VHVA_TO_VSAA_BLK	_IOWR(VE_IOC_MAGIC, 21, struct ve_vp_blk)
+#define VEDRV_CMD_VHVA_TO_VSAA_BLK_PIN_DOWN _IOWR(VE_IOC_MAGIC, 22, struct ve_vp_blk)
+#define VEDRV_CMD_RELEASE_PD_PAGE_BLK	_IOR(VE_IOC_MAGIC, 23, \
+						struct ve_vp_blk_release)
 
 #endif /*VE_DRV_H_INCLUDE_*/
