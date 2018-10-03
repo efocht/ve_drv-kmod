@@ -1505,6 +1505,27 @@ long ve_drv_cmd_vhva_to_vsaa(struct ve_dev *dev,
 	return ret;
 }
 
+long ve_drv_cmd_vhva_to_vsaa_blk(struct ve_dev *dev,
+		struct ve_vp_blk __user *uptr, int pindown)
+{
+	int ret;
+	int type;
+	struct ve_node *node = dev->node;
+
+	ret = get_user(type, &uptr->type);
+	if (ret)
+		return -EFAULT;
+	if (type < 0 || NR_PD_LIST <= type)
+		return -EINVAL;
+
+	mutex_lock(&node->page_mutex[type]);
+	ret = vp_v2p_blk_from_user((struct vp_blk __user *)&uptr->vp_info,
+				   pindown, &node->hash_list_head[type]);
+	mutex_unlock(&node->page_mutex[type]);
+
+	return ret;
+}
+
 long ve_drv_cmd_release_pd_page(struct ve_dev *dev,
 		struct ve_vp_release __user *uptr, int all)
 {
@@ -1532,6 +1553,62 @@ long ve_drv_cmd_release_pd_page(struct ve_dev *dev,
 err:
 	mutex_unlock(&node->page_mutex[type]);
 
+	return ret;
+}
+
+long ve_drv_cmd_release_pd_page_blk(struct ve_dev *dev,
+		struct ve_vp_blk_release __user *uptr)
+{
+	int ret;
+	int npages, type;
+	uint64_t *addr;
+	uint64_t *addrs;
+	uint64_t smallbuff[128];
+	struct ve_node *node = dev->node;
+
+	ret = get_user(type, &uptr->type);
+	if (ret)
+		return -EFAULT;
+	ret = get_user(npages, &uptr->npages);
+	if (ret)
+		return -EFAULT;
+	if (npages > VP_MAXBULK) {
+		printk(KERN_ERR "ve_drv_cmd_release_pd_page_blk npages %d > %d\n",
+		       npages, VP_MAXBULK);
+		return -EINVAL;
+	}
+	/* avoid kmalloc for small buffers */
+	if (npages < 128)
+		addrs = smallbuff;
+	else {
+		addrs = kmalloc(npages * sizeof(uint64_t), GFP_KERNEL);
+		if (!addrs) {
+			printk(KERN_ERR "ve_drv_cmd_release_pd_page_blk "
+			       "kmalloc failed. npages=%d\n", npages);
+			return -ENOMEM;
+		}
+	}
+	
+	if (type < 0 || NR_PD_LIST <= type) {
+		printk(KERN_ERR "ve_drv_cmd_release_pd_page_bulk type=%d\n", type);
+		return -EINVAL;
+	}
+	ret = get_user(addr, &uptr->addr);
+	if (ret)
+		return -EFAULT;
+
+	mutex_lock(&node->page_mutex[type]);
+	ret = copy_from_user(addrs, (void __user *)addr,
+			     npages * sizeof(uint64_t));
+	if (ret)
+		goto err;
+	ret = vp_page_release_blk(addrs, npages, &node->hash_list_head[type]);
+
+err:
+	mutex_unlock(&node->page_mutex[type]);
+
+	if (npages >= 128)
+		kfree(addrs);
 	return ret;
 }
 
@@ -1586,9 +1663,21 @@ long ve_drv_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		ret = ve_drv_cmd_vhva_to_vsaa(vedev,
 				(struct ve_vp __user *)arg, 1);
 		break;
+	case VEDRV_CMD_VHVA_TO_VSAA_BLK:
+		ret = ve_drv_cmd_vhva_to_vsaa_blk(vedev,
+				(struct ve_vp_blk  __user *)arg, 0);
+		break;
+	case VEDRV_CMD_VHVA_TO_VSAA_BLK_PIN_DOWN:
+		ret = ve_drv_cmd_vhva_to_vsaa_blk(vedev,
+				(struct ve_vp_blk __user *)arg, 1);
+		break;
 	case VEDRV_CMD_RELEASE_PD_PAGE:
 		ret = ve_drv_cmd_release_pd_page(vedev,
 				(struct ve_vp_release  __user *)arg, 0);
+		break;
+	case VEDRV_CMD_RELEASE_PD_PAGE_BLK:
+		ret = ve_drv_cmd_release_pd_page_blk(vedev,
+				(struct ve_vp_blk_release  __user *)arg);
 		break;
 	case VEDRV_CMD_RELEASE_PD_PAGE_ALL:
 		ret = ve_drv_cmd_release_pd_page(vedev,
